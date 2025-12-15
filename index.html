@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>서버 랙 에디터 (라벨 표시 기능 추가)</title>
+    <style>
+        /* --- 기본 스타일 --- */
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #1e1e1e; color: #eee; display: flex; height: 100vh; overflow: hidden; }
+
+        .main-content { flex: 1; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #1e1e1e; overflow: auto; padding: 20px; }
+        .sidebar { width: 350px; background: #252526; border-left: 1px solid #333; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; box-shadow: -5px 0 15px rgba(0,0,0,0.2); z-index: 20; }
+
+        /* 툴바 */
+        .toolbar { width: 100%; max-width: 900px; margin-bottom: 15px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        button { cursor: pointer; padding: 8px 12px; border: none; border-radius: 4px; font-weight: bold; transition: 0.2s; white-space: nowrap; font-size: 0.9em; }
+
+        .btn-primary { background: #007acc; color: white; }
+        .btn-primary:hover { background: #005f9e; }
+        .btn-danger { background: #d9534f; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-export { background: #6f42c1; color: white; }
+        .btn-export:hover { background: #5a32a3; }
+        .btn-import { background: #e0a800; color: black; }
+        .btn-import:hover { background: #c69500; }
+
+        .btn-toggle.active { background: #ffc107; color: black; box-shadow: 0 0 8px rgba(255, 193, 7, 0.5); }
+
+        /* 워크스페이스 */
+        .workspace { position: relative; border: 2px solid #444; box-shadow: 0 0 20px rgba(0,0,0,0.5); user-select: none; }
+        .workspace img { display: block; max-width: 100%; max-height: 85vh; pointer-events: none; }
+
+        /* Zone 스타일 */
+        .zone { position: absolute; border: 2px solid rgba(0, 255, 255, 0.5); background: rgba(0, 255, 255, 0.1); cursor: pointer; }
+        .zone:hover { background: rgba(0, 255, 255, 0.3); z-index: 5; } /* 호버 시 위로 올라오게 */
+        .zone.selected { border-color: #ffc107; background: rgba(255, 193, 7, 0.2); z-index: 10; box-shadow: 0 0 10px rgba(255, 193, 7, 0.5); }
+
+        /* ★ 추가된 라벨 스타일 ★ */
+        .zone-label {
+            position: absolute;
+            top: 0;
+            left: 0;
+            background: rgba(0, 0, 0, 0.7); /* 반투명 검정 배경 */
+            color: #fff;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-weight: normal;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            pointer-events: none; /* 라벨을 클릭해도 부모인 zone이 클릭되도록 */
+        }
+        /* 선택된 영역의 라벨은 노란색으로 강조 */
+        .zone.selected .zone-label {
+            background: #ffc107;
+            color: #000;
+            font-weight: bold;
+        }
+
+        /* 폼 스타일 */
+        h3 { margin-top: 0; color: #ddd; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-size: 0.85em; color: #aaa; margin-bottom: 6px; }
+        input, textarea { width: 100%; padding: 10px; background: #3c3c3c; border: 1px solid #555; color: white; border-radius: 4px; }
+        input:focus, textarea:focus { outline: none; border-color: #007acc; background: #444; }
+
+        .attr-row { display: flex; gap: 5px; margin-bottom: 8px; align-items: center; }
+        .attr-key { flex: 1; font-size: 0.9em; }
+        .attr-val { flex: 1.5; font-size: 0.9em; }
+        .btn-remove { background: transparent; border: 1px solid #555; color: #aaa; padding: 6px 10px; }
+        .btn-remove:hover { color: #ff6b6b; border-color: #ff6b6b; }
+
+        .hidden { display: none !important; }
+        .cursor-crosshair { cursor: crosshair !important; }
+        .file-upload-wrapper { position: relative; overflow: hidden; display: inline-block; }
+        .file-upload-wrapper input[type=file] { font-size: 100px; position: absolute; left: 0; top: 0; opacity: 0; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="main-content">
+    <div class="toolbar">
+        <div class="file-upload-wrapper">
+            <button class="btn-primary">📷 새 사진 시작</button>
+            <input type="file" id="imgUpload" accept="image/*">
+        </div>
+
+        <div class="file-upload-wrapper">
+            <button class="btn-import">📂 불러오기 (수정)</button>
+            <input type="file" id="projectUpload" accept=".html">
+        </div>
+
+        <div style="width: 1px; height: 20px; background: #555; margin: 0 10px;"></div>
+
+        <button id="btnAddMode" class="btn-toggle" onclick="toggleAddMode()">+ 영역 추가</button>
+
+        <div style="flex:1"></div>
+
+        <button onclick="exportSingleHtml()" class="btn-export">💾 저장/내보내기 (HTML)</button>
+    </div>
+
+    <span id="modeStatus" style="font-size: 0.9em; color: #ffc107; margin-bottom:5px; height: 20px;"></span>
+
+    <div id="workspace" class="workspace">
+        <img id="targetImage" src="" alt="새 사진을 시작하거나 기존 파일을 불러오세요" style="display: none;">
+    </div>
+</div>
+
+<div class="sidebar">
+    <h3>Inspection (편집)</h3>
+
+    <div id="emptyState" style="color: #777; text-align: center; margin-top: 50px; line-height: 1.6;">
+        서버 영역을 선택하거나<br>새로 추가해주세요.
+    </div>
+
+    <div id="editForm" class="hidden">
+        <div class="form-group">
+            <label>서버 이름</label>
+            <input type="text" id="inputName" placeholder="예: Web Server 01" oninput="liveUpdateName()">
+        </div>
+        <div class="form-group">
+            <label>설명 / 메모</label>
+            <textarea id="inputDesc" rows="4" placeholder="서버 용도나 특이사항..."></textarea>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; margin-top: 25px; border-bottom: 1px solid #444; padding-bottom: 8px;">
+            <span style="font-weight: bold; font-size: 0.95em;">세부 속성</span>
+            <button onclick="addAttrField()" class="btn-success" style="font-size: 0.8em; padding: 4px 8px;">+ 추가</button>
+        </div>
+
+        <div id="attributesContainer"></div>
+
+        <div style="margin-top: 40px; display: flex; gap: 10px; flex-direction: column;">
+            <button onclick="saveChanges()" class="btn-primary" style="padding: 12px;">저장 및 적용</button>
+            <button onclick="deleteZone()" class="btn-danger">영역 삭제</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- 상태 변수 ---
+    let zones = [];
+    let isAddingMode = false;
+    let isDrawing = false;
+    let startX, startY;
+    let selectedZoneId = null;
+    let nextId = 1;
+
+    // --- DOM Elements ---
+    const workspace = document.getElementById('workspace');
+    const targetImage = document.getElementById('targetImage');
+    const imgUpload = document.getElementById('imgUpload');
+    const projectUpload = document.getElementById('projectUpload');
+    const btnAddMode = document.getElementById('btnAddMode');
+    const editForm = document.getElementById('editForm');
+    const emptyState = document.getElementById('emptyState');
+    const attributesContainer = document.getElementById('attributesContainer');
+    const modeStatus = document.getElementById('modeStatus');
+
+    // ============================================
+    // 1. 초기화 및 파일 로드
+    // ============================================
+    imgUpload.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                resetEditor();
+                targetImage.src = evt.target.result;
+                targetImage.style.display = 'block';
+            }
+            reader.readAsDataURL(file);
+        }
+        e.target.value = '';
+    });
+
+    projectUpload.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            const htmlContent = evt.target.result;
+            const imgMatch = htmlContent.match(/<img src="(data:image\/[^"]+)"/);
+            const zoneMatch = htmlContent.match(/const zones = (\[[\s\S]*?\]);/);
+
+            if (imgMatch && zoneMatch) {
+                resetEditor();
+                targetImage.src = imgMatch[1];
+                targetImage.style.display = 'block';
+                try {
+                    zones = JSON.parse(zoneMatch[1]);
+                    if(zones.length > 0) {
+                        const maxId = Math.max(...zones.map(z => z.id));
+                        nextId = maxId + 1;
+                    }
+                    renderZones();
+                    alert("프로젝트를 성공적으로 불러왔습니다!");
+                } catch(err) {
+                    alert("데이터 파싱 오류");
+                }
+            } else {
+                alert("올바른 HTML 파일이 아닙니다.");
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+    });
+
+    function resetEditor() {
+        zones = [];
+        selectedZoneId = null;
+        renderZones();
+        deselect();
+        nextId = 1;
+    }
+
+    // ============================================
+    // 2. 에디터 동작 로직
+    // ============================================
+    function toggleAddMode() {
+        if (!targetImage.src || targetImage.style.display === 'none') {
+            alert("사진을 먼저 불러오세요.");
+            return;
+        }
+        isAddingMode = !isAddingMode;
+        if (isAddingMode) {
+            btnAddMode.classList.add('active');
+            workspace.classList.add('cursor-crosshair');
+            modeStatus.innerText = "✨ 드래그하여 영역을 그리세요";
+            deselect();
+        } else {
+            btnAddMode.classList.remove('active');
+            workspace.classList.remove('cursor-crosshair');
+            modeStatus.innerText = "";
+        }
+    }
+
+    workspace.addEventListener('mousedown', (e) => {
+        if (!isAddingMode || !targetImage.src) return;
+        isDrawing = true;
+        const rect = workspace.getBoundingClientRect();
+        startX = e.clientX - rect.left;
+        startY = e.clientY - rect.top;
+
+        const ghost = document.createElement('div');
+        ghost.id = 'ghost-box';
+        ghost.style.position = 'absolute';
+        ghost.style.border = '2px dashed #ffc107';
+        ghost.style.left = startX + 'px';
+        ghost.style.top = startY + 'px';
+        workspace.appendChild(ghost);
+    });
+
+    workspace.addEventListener('mousemove', (e) => {
+        if (!isDrawing) return;
+        const rect = workspace.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+        const width = Math.abs(currentX - startX);
+        const height = Math.abs(currentY - startY);
+        const left = Math.min(currentX, startX);
+        const top = Math.min(currentY, startY);
+        const ghost = document.getElementById('ghost-box');
+        ghost.style.width = width + 'px';
+        ghost.style.height = height + 'px';
+        ghost.style.left = left + 'px';
+        ghost.style.top = top + 'px';
+    });
+
+    workspace.addEventListener('mouseup', (e) => {
+        if (!isDrawing) return;
+        isDrawing = false;
+        const ghost = document.getElementById('ghost-box');
+        if(ghost) ghost.remove();
+
+        const rect = workspace.getBoundingClientRect();
+        const endX = e.clientX - rect.left;
+        const endY = e.clientY - rect.top;
+        const imgW = workspace.clientWidth;
+        const imgH = workspace.clientHeight;
+        const pixelW = Math.abs(endX - startX);
+        const pixelH = Math.abs(endY - startY);
+
+        if (pixelW < 20 || pixelH < 20) return;
+
+        const finalLeft = (Math.min(startX, endX) / imgW) * 100;
+        const finalTop = (Math.min(startY, endY) / imgH) * 100;
+        const finalW = (pixelW / imgW) * 100;
+        const finalH = (pixelH / imgH) * 100;
+
+        const newZone = {
+            id: nextId++,
+            x: finalLeft, y: finalTop, w: finalW, h: finalH,
+            name: 'Server ' + nextId,
+            desc: '',
+            attrs: []
+        };
+        zones.push(newZone);
+        renderZones();
+        selectZone(newZone.id);
+        toggleAddMode();
+    });
+
+    // ★ 렌더링 함수 수정: 라벨 추가 ★
+    function renderZones() {
+        const oldZones = document.querySelectorAll('.zone');
+        oldZones.forEach(el => el.remove());
+
+        zones.forEach(z => {
+            const div = document.createElement('div');
+            div.className = 'zone';
+            if(selectedZoneId === z.id) div.classList.add('selected');
+            div.style.left = z.x + '%';
+            div.style.top = z.y + '%';
+            div.style.width = z.w + '%';
+            div.style.height = z.h + '%';
+            div.id = 'zone-' + z.id; // 실시간 업데이트를 위한 ID 부여
+
+            // 라벨 생성
+            const label = document.createElement('div');
+            label.className = 'zone-label';
+            label.innerText = z.name;
+            div.appendChild(label);
+
+            div.onclick = (e) => {
+                e.stopPropagation();
+                if(!isAddingMode) selectZone(z.id);
+            };
+            workspace.appendChild(div);
+        });
+    }
+
+    function selectZone(id) {
+        selectedZoneId = id;
+        renderZones();
+        emptyState.classList.add('hidden');
+        editForm.classList.remove('hidden');
+
+        const zone = zones.find(z => z.id === id);
+        document.getElementById('inputName').value = zone.name || '';
+        document.getElementById('inputDesc').value = zone.desc || '';
+
+        attributesContainer.innerHTML = '';
+        if (zone.attrs) {
+            zone.attrs.forEach(attr => addAttrField(attr.key, attr.val));
+        }
+    }
+
+    function deselect() {
+        selectedZoneId = null;
+        renderZones();
+        emptyState.classList.remove('hidden');
+        editForm.classList.add('hidden');
+    }
+
+    // ★ 실시간 이름 업데이트 기능 ★
+    function liveUpdateName() {
+        if (!selectedZoneId) return;
+        const newName = document.getElementById('inputName').value;
+
+        // 데이터 업데이트
+        const zone = zones.find(z => z.id === selectedZoneId);
+        if (zone) zone.name = newName;
+
+        // DOM 즉시 업데이트 (전체 리렌더링 없이 라벨만 변경)
+        const zoneEl = document.getElementById('zone-' + selectedZoneId);
+        if (zoneEl) {
+            const label = zoneEl.querySelector('.zone-label');
+            if (label) label.innerText = newName;
+        }
+    }
+
+    function addAttrField(key = '', val = '') {
+        const row = document.createElement('div');
+        row.className = 'attr-row';
+        row.innerHTML = `
+                <input type="text" class="attr-key" placeholder="속성명" value="${key}">
+                <input type="text" class="attr-val" placeholder="값" value="${val}">
+                <button class="btn-remove" onclick="this.parentElement.remove()">X</button>
+            `;
+        attributesContainer.appendChild(row);
+    }
+
+    function saveChanges() {
+        if (!selectedZoneId) return;
+        // liveUpdateName에서 이미 name은 업데이트 됨
+        const zone = zones.find(z => z.id === selectedZoneId);
+        zone.name = document.getElementById('inputName').value; // 혹시 몰라 한번 더
+        zone.desc = document.getElementById('inputDesc').value;
+
+        const rows = document.querySelectorAll('.attr-row');
+        const newAttrs = [];
+        rows.forEach(row => {
+            const k = row.querySelector('.attr-key').value;
+            const v = row.querySelector('.attr-val').value;
+            if (k) newAttrs.push({ key: k, val: v });
+        });
+        zone.attrs = newAttrs;
+
+        renderZones(); // 최종 반영
+
+        const btn = document.querySelector('#editForm .btn-primary');
+        const originalText = btn.innerText;
+        btn.innerText = "✔ 반영됨";
+        setTimeout(() => btn.innerText = originalText, 1000);
+    }
+
+    function deleteZone() {
+        if (!selectedZoneId) return;
+        if(confirm('이 영역을 삭제하시겠습니까?')) {
+            zones = zones.filter(z => z.id !== selectedZoneId);
+            deselect();
+        }
+    }
+
+    // ============================================
+    // 3. 내보내기 (저장) 로직
+    // ============================================
+    function exportSingleHtml() {
+        if (!targetImage.src || targetImage.style.display === 'none') {
+            alert("저장할 내용이 없습니다.");
+            return;
+        }
+
+        const imageData = targetImage.src;
+        const zonesData = JSON.stringify(zones);
+
+        // 뷰어 HTML 템플릿 (라벨 스타일 포함)
+        const htmlContent = `
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>서버 정보 뷰어</title>
+    <style>
+        body { margin:0; padding:0; background:#1e1e1e; color:#eee; font-family:'Segoe UI', sans-serif; display:flex; height:100vh; overflow:hidden; }
+        .viewer-container { flex:1; display:flex; justify-content:center; align-items:center; overflow:auto; padding:20px; position:relative; }
+        .image-wrapper { position:relative; border:2px solid #444; box-shadow:0 0 20px rgba(0,0,0,0.5); }
+        .image-wrapper img { display:block; max-width:100%; max-height:90vh; }
+
+        .zone { position:absolute; cursor:pointer; border:1px solid rgba(255,255,255,0.3); background:rgba(0,255,255,0.1); transition:0.2s; }
+        .zone:hover, .zone.active { background:rgba(0,255,255,0.3); border-color:#00e5ff; box-shadow:0 0 10px #00e5ff; z-index: 10; }
+
+        /* 뷰어용 라벨 스타일 */
+        .zone-label {
+            position: absolute; top: 0; left: 0;
+            background: rgba(0, 0, 0, 0.7); color: #fff;
+            padding: 2px 6px; font-size: 11px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+        }
+        .zone.active .zone-label { background: #00e5ff; color: #000; font-weight: bold; }
+
+        .info-panel { width:320px; background:#252526; border-left:1px solid #333; padding:25px; overflow-y:auto; box-shadow:-5px 0 15px rgba(0,0,0,0.3); display:flex; flex-direction:column; }
+        .info-title { font-size:1.5em; color:#fff; border-bottom:1px solid #444; padding-bottom:10px; margin-top:0; }
+        .info-desc { color:#ccc; line-height:1.5; margin-bottom:20px; white-space: pre-wrap; }
+        .attr-table { width:100%; border-collapse:collapse; margin-top:10px; }
+        .attr-table th, .attr-table td { text-align:left; padding:8px; border-bottom:1px solid #444; font-size:0.9em; }
+        .attr-table th { color:#888; width:40%; }
+        .attr-table td { color:#fff; font-weight:bold; }
+        .empty-msg { color:#666; text-align:center; margin-top:50%; }
+    </style>
+</head>
+<body>
+    <div class="viewer-container">
+        <div class="image-wrapper" id="imgWrapper">
+            <img src="${imageData}">
+        </div>
+    </div>
+    <div class="info-panel" id="infoPanel">
+        <div class="empty-msg">서버 영역을 클릭하여<br>상세 정보를 확인하세요.</div>
+    </div>
+
+    <script>
+        const zones = ${zonesData};
+
+        const imgWrapper = document.getElementById('imgWrapper');
+        const infoPanel = document.getElementById('infoPanel');
+
+        zones.forEach(z => {
+            const div = document.createElement('div');
+            div.className = 'zone';
+            div.style.left = z.x + '%';
+            div.style.top = z.y + '%';
+            div.style.width = z.w + '%';
+            div.style.height = z.h + '%';
+
+            // 라벨 추가
+            const label = document.createElement('div');
+            label.className = 'zone-label';
+            label.innerText = z.name;
+            div.appendChild(label);
+
+            div.onclick = (e) => showInfo(z, div);
+            imgWrapper.appendChild(div);
+        });
+
+        function showInfo(z, element) {
+            document.querySelectorAll('.zone').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+
+            let attrHtml = '';
+            if(z.attrs && z.attrs.length > 0) {
+                attrHtml = '<table class="attr-table">';
+                z.attrs.forEach(attr => {
+                    attrHtml += \`<tr><th>\${attr.key}</th><td>\${attr.val}</td></tr>\`;
+                });
+                attrHtml += '</table>';
+            }
+
+            infoPanel.innerHTML = \`
+                <h2 class="info-title">\${z.name}</h2>
+                <div class="info-desc">\${z.desc || '설명 없음'}</div>
+                \${attrHtml}
+            \`;
+        }
+    <\/script>
+</body>
+</html>`;
+
+        const blob = new Blob([htmlContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'server_rack_project_v2.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+</script>
+</body>
+</html>
